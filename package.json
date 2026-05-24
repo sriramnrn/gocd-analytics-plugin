@@ -7,6 +7,10 @@
   "scripts": {
     "lint": "",
     "webpack-dev": "NODE_OPTIONS=--openssl-legacy-provider webpack --config config/webpack.config.js --mode development",
+    "webpack-debug": "node -e \"require('fs').rmSync('build/resources/webpack', {recursive: true, force: true})\" && NODE_OPTIONS=--openssl-legacy-provider webpack --config config/webpack.debug.js --mode development",
+    "webpack-debug-watch": "node -e \"require('fs').rmSync('build/resources/webpack', {recursive: true, force: true})\" && NODE_OPTIONS=--openssl-legacy-provider webpack --config config/webpack.debug.js --mode development --watch",
+    "webpack-debug-sync": "NODE_OPTIONS=--openssl-legacy-provider node scripts/webpack-debug-watch-sync.js --once",
+    "webpack-debug-watch-sync": "NODE_OPTIONS=--openssl-legacy-provider node scripts/webpack-debug-watch-sync.js",
     "webpack-prod": "NODE_OPTIONS=--openssl-legacy-provider webpack --config config/webpack.prod.js --mode production",
     "specs": "NODE_OPTIONS=--openssl-legacy-provider karma start config/karma.config.js",
     "specs-ci": "NODE_OPTIONS=--openssl-legacy-provider karma start config/karma.config.js --single-run --no-auto-watch --color",

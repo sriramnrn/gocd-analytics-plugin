@@ -46,6 +46,42 @@ gocdPlugin {
 
 version = gocdPlugin.fullVersion(project)
 
+def frontendDebugTaskRequested = gradle.startParameter.taskNames.any { taskName ->
+  taskName == 'debugPluginJar' ||
+    taskName.endsWith(':debugPluginJar') ||
+    taskName == 'syncDebugPluginAssets' ||
+    taskName.endsWith(':syncDebugPluginAssets')
+}
+def frontendDebugBuild = providers.gradleProperty('frontendDebug').map { it.toBoolean() }.orElse(frontendDebugTaskRequested)
+def goCdRepoPath = providers.gradleProperty('gocdRepo').orElse(providers.environmentVariable('GOCD_REPO'))
+def pluginAssetsHash = providers.gradleProperty('pluginAssetsHash').orElse(providers.environmentVariable('GOCD_PLUGIN_ASSETS_HASH'))
+
+def resolveGoCdPluginAssetCacheDir = {
+  if (!goCdRepoPath.isPresent()) {
+    throw new GradleException("Set -PgocdRepo=/path/to/gocd or GOCD_REPO=/path/to/gocd. Alternatively use npm run webpack-debug-watch-sync with GOCD_PLUGIN_ASSET_CACHE_DIR set to the exact hash directory.")
+  }
+
+  def pluginAssetRoot = file("${goCdRepoPath.get()}/server/src/main/webapp/WEB-INF/rails/public/assets/plugins/${gocdPlugin.id}")
+  if (!pluginAssetRoot.directory) {
+    throw new GradleException("GoCD plugin asset root does not exist: ${pluginAssetRoot}. Start GoCD with the jar installed so plugin metadata load extracts assets first.")
+  }
+
+  if (pluginAssetsHash.isPresent()) {
+    def hashDir = new File(pluginAssetRoot, pluginAssetsHash.get())
+    if (!hashDir.directory) {
+      throw new GradleException("GoCD plugin asset hash directory does not exist: ${hashDir}")
+    }
+    return hashDir
+  }
+
+  def hashDirs = pluginAssetRoot.listFiles({ File file -> file.directory } as FileFilter)
+  if (!hashDirs) {
+    throw new GradleException("No hash directories found under ${pluginAssetRoot}. Trigger GoCD plugin metadata load/reload first.")
+  }
+
+  return hashDirs.max { it.lastModified() }
+}
+
 java {
   sourceCompatibility = JavaVersion.VERSION_11
   targetCompatibility = JavaVersion.VERSION_11
@@ -105,11 +141,64 @@ task generateWebpackAssets(type: NpmTask) {
   inputs.file('package.json')
   inputs.file('package-lock.json')
   inputs.file('config/webpack.config.js')
+  inputs.file('config/webpack.debug.js')
+  inputs.file('config/webpack.prod.js')
 
   outputs.dir('build/resources/webpack')
 
   dependsOn npm_install
-  args = ['run', System.getenv('FOR_ENVIRONMENT') == 'development' ? 'webpack-dev' : 'webpack-prod']
+  args = ['run', frontendDebugBuild.get() ? 'webpack-debug' : (System.getenv('FOR_ENVIRONMENT') == 'development' ? 'webpack-dev' : 'webpack-prod')]
+}
+
+task watchWebpackDebugAssets(type: NpmTask) {
+  inputs.files(fileTree('node_modules'))
+  inputs.files(fileTree('assets'))
+  inputs.file('package.json')
+  inputs.file('package-lock.json')
+  inputs.file('config/webpack.config.js')
+  inputs.file('config/webpack.debug.js')
+
+  outputs.dir('build/resources/webpack')
+
+  dependsOn npm_install
+  args = ['run', 'webpack-debug-watch']
+}
+
+task syncDebugPluginAssets(type: Sync) {
+  group = 'development'
+  description = 'Builds debug frontend assets and syncs them into GoCD server asset cache. Set -PgocdRepo=/path/to/gocd and optionally -PpluginAssetsHash=<hash>.'
+
+  dependsOn generateWebpackAssets
+  from "${project.buildDir}/resources/webpack"
+  into { resolveGoCdPluginAssetCacheDir() }
+}
+
+task watchAndSyncDebugPluginAssets(type: NpmTask) {
+  group = 'development'
+  description = 'Watches debug frontend assets and syncs each rebuild into GoCD server asset cache. Set -PgocdRepo=/path/to/gocd and optionally -PpluginAssetsHash=<hash>.'
+
+  inputs.files(fileTree('node_modules'))
+  inputs.files(fileTree('assets'))
+  inputs.file('package.json')
+  inputs.file('package-lock.json')
+  inputs.file('config/webpack.config.js')
+  inputs.file('config/webpack.debug.js')
+  inputs.file('scripts/webpack-debug-watch-sync.js')
+
+  outputs.dir('build/resources/webpack')
+
+  dependsOn npm_install
+  def npmArgs = ['run', 'webpack-debug-watch-sync']
+  if (goCdRepoPath.isPresent()) {
+    npmArgs.addAll(['--', '--gocd-repo', goCdRepoPath.get()])
+  }
+  if (pluginAssetsHash.isPresent()) {
+    if (!goCdRepoPath.isPresent()) {
+      npmArgs.add('--')
+    }
+    npmArgs.addAll(['--plugin-assets-hash', pluginAssetsHash.get()])
+  }
+  args = npmArgs
 }
 
 def props = [
@@ -178,7 +267,9 @@ task packageAssets(type: Zip) {
   from "${project.buildDir}/resources/webpack"
   destinationDirectory = file("${project.buildDir}/resources")
   archiveFileName = 'assets.zip'
-  exclude '**/*.map'
+  if (!frontendDebugBuild.get()) {
+    exclude '**/*.map'
+  }
 
   preserveFileTimestamps = false
   reproducibleFileOrder = true
@@ -198,6 +289,12 @@ processResources {
   from packageAssets
 
   dependsOn "generateResources" // defined in gocd-plugin-gradle-task-helpers
+}
+
+task debugPluginJar {
+  group = 'build'
+  description = 'Builds the plugin jar with unminified frontend JavaScript and external source maps packaged in assets.zip.'
+  dependsOn jar
 }
 
 task lint(type: NpmTask) {
