@@ -55,6 +55,7 @@ def frontendDebugTaskRequested = gradle.startParameter.taskNames.any { taskName 
 def frontendDebugBuild = providers.gradleProperty('frontendDebug').map { it.toBoolean() }.orElse(frontendDebugTaskRequested)
 def goCdRepoPath = providers.gradleProperty('gocdRepo').orElse(providers.environmentVariable('GOCD_REPO'))
 def pluginAssetsHash = providers.gradleProperty('pluginAssetsHash').orElse(providers.environmentVariable('GOCD_PLUGIN_ASSETS_HASH'))
+def skipNpm = providers.gradleProperty('skipNpm').map { it.toBoolean() }.orElse(false)
 
 def resolveGoCdPluginAssetCacheDir = {
   if (!goCdRepoPath.isPresent()) {
@@ -317,6 +318,26 @@ task assetSpecs(type: NpmTask) {
 
   dependsOn npm_install
   args = ['run', 'specs-ci']
+}
+
+tasks.withType(NpmTask).configureEach {
+  onlyIf {
+    if (skipNpm.get()) {
+      logger.lifecycle("Skipping ${path} because -PskipNpm=true was specified.")
+      return false
+    }
+    true
+  }
+}
+
+[packageAssetSourceMaps, packageAssets, syncDebugPluginAssets].each { npmRelatedTask ->
+  npmRelatedTask.onlyIf {
+    if (skipNpm.get()) {
+      logger.lifecycle("Skipping ${npmRelatedTask.path} because -PskipNpm=true was specified.")
+      return false
+    }
+    true
+  }
 }
 
 test.dependsOn lint

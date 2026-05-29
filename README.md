@@ -19,6 +19,8 @@ Table of Contents
 
 To build the jar, run `./gradlew clean check assemble`
 
+To skip npm install and npm-related frontend build tasks, run `./gradlew clean check assemble -PskipNpm=true`
+
 ## License
 
 ```plain
