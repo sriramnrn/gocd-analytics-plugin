@@ -22,9 +22,23 @@ const debugConfig = require("../config/webpack.debug.js");
 const PLUGIN_ID = "com.thoughtworks.gocd.analytics";
 const WORKSPACE = path.resolve(__dirname, "..");
 const WEBPACK_OUTPUT_DIR = path.join(WORKSPACE, "build", "resources", "webpack");
+const DEFAULT_WATCH_INTERVAL_SECONDS = 2;
+
+function parseWatchIntervalSeconds(value) {
+  if (!value) {
+    throw new Error("Pass a watch interval in seconds after --watch-interval.");
+  }
+
+  const intervalSeconds = Number(value);
+  if (!Number.isFinite(intervalSeconds) || intervalSeconds <= 0) {
+    throw new Error(`Watch interval must be a positive number of seconds, got: ${value}`);
+  }
+
+  return intervalSeconds;
+}
 
 function readArgs(argv) {
-  const options = {};
+  const options = {watchIntervalSeconds: DEFAULT_WATCH_INTERVAL_SECONDS};
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -36,6 +50,10 @@ function readArgs(argv) {
       options.pluginAssetsHash = argv[++i];
     } else if (arg === "--target-dir") {
       options.targetDir = argv[++i];
+    } else if (arg === "--watch-interval") {
+      options.watchIntervalSeconds = parseWatchIntervalSeconds(argv[++i]);
+    } else if (arg.startsWith("--watch-interval=")) {
+      options.watchIntervalSeconds = parseWatchIntervalSeconds(arg.split("=")[1]);
     }
   }
 
@@ -155,6 +173,7 @@ if (options.once) {
     }
   });
 } else {
-  console.log(`Watching debug assets and syncing to ${targetDir}`);
-  compiler.watch({}, callback);
+  const watchIntervalMs = options.watchIntervalSeconds * 1000;
+  console.log(`Watching debug assets every ${options.watchIntervalSeconds}s and syncing to ${targetDir}`);
+  compiler.watch({poll: watchIntervalMs}, callback);
 }
